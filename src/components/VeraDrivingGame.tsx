@@ -159,6 +159,11 @@ export default function VeraDrivingGame() {
       else if (brake) c.speed -= 520 * dt;
       else c.speed *= Math.exp(-0.8 * dt);
       c.speed = Math.max(-160, Math.min(560, c.speed));
+      const say = (line: string) => {
+        s.speech = line;
+        s.speechT = 2.4;
+      };
+
       const steer = (left ? -1 : 0) + (right ? 1 : 0);
       // deliberately twitchy steering: Vera cannot drive
       c.angle += steer * dt * 3.1 * Math.min(1, Math.abs(c.speed) / 120) * (c.speed < 0 ? -1 : 1);
