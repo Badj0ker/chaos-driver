@@ -328,6 +328,35 @@ export default function VeraDrivingGame() {
       }
       ctx.setLineDash([]);
 
+      // exam route: gold dashed line through remaining waypoints
+      if (!s.routeDone) {
+        ctx.strokeStyle = "rgba(255,210,63,0.75)";
+        ctx.lineWidth = 8;
+        ctx.setLineDash([16, 14]);
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(c.x - camX, c.y - camY);
+        for (let i = s.routeIdx; i < s.route.length; i++) ctx.lineTo(s.route[i].x - camX, s.route[i].y - camY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        // pulsing next checkpoint
+        const wp = s.route[s.routeIdx];
+        const pulse = 16 + Math.sin(now / 180) * 5;
+        ctx.fillStyle = "rgba(255,210,63,0.35)";
+        ctx.beginPath();
+        ctx.arc(wp.x - camX, wp.y - camY, pulse + 12, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#ffd23f";
+        ctx.beginPath();
+        ctx.arc(wp.x - camX, wp.y - camY, pulse * 0.6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#101820";
+        ctx.font = "black 16px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(String(s.routeIdx), wp.x - camX, wp.y - camY);
+      }
+
       // skid marks
       ctx.strokeStyle = "rgba(0,0,0,0.35)";
       ctx.lineWidth = 5;
