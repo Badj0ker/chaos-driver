@@ -208,11 +208,6 @@ export default function VeraDrivingGame() {
         if (s.skid.length > 260) s.skid.shift();
       }
 
-      const say = (line: string) => {
-        s.speech = line;
-        s.speechT = 2.4;
-      };
-
       // pedestrians
       for (const p of s.peds) {
         if (p.alive) {
