@@ -418,29 +418,65 @@ export default function VeraDrivingGame() {
       ctx.save();
       ctx.translate(c.x - camX, c.y - camY);
       ctx.rotate(c.angle);
+      // shadow
       ctx.fillStyle = "rgba(0,0,0,0.3)";
-      ctx.fillRect(-28, -14, 58, 30);
+      ctx.beginPath();
+      ctx.roundRect(-38, -20, 76, 42, 10);
+      ctx.fill();
+      // body
       ctx.fillStyle = "#ffd23f";
-      ctx.fillRect(-30, -16, 58, 30);
+      ctx.beginPath();
+      ctx.roundRect(-40, -22, 76, 44, 10);
+      ctx.fill();
+      // hood stripe + headlights
+      ctx.fillStyle = "rgba(0,0,0,0.12)";
+      ctx.fillRect(24, -22, 12, 44);
+      ctx.fillStyle = "#fff6c9";
+      ctx.fillRect(34, -18, 5, 8);
+      ctx.fillRect(34, 10, 5, 8);
+      // cabin
+      ctx.fillStyle = "#c9a227";
+      ctx.beginPath();
+      ctx.roundRect(-16, -18, 36, 36, 8);
+      ctx.fill();
+      // windshield
+      ctx.fillStyle = "rgba(190,230,255,0.9)";
+      ctx.fillRect(16, -14, 6, 28);
+      ctx.fillRect(-22, -14, 5, 28);
+      // wheels
       ctx.fillStyle = "#1c1f24";
-      ctx.fillRect(-30, -19, 12, 6);
-      ctx.fillRect(-30, 13, 12, 6);
-      ctx.fillRect(16, -19, 12, 6);
-      ctx.fillRect(16, 13, 12, 6);
+      ctx.fillRect(-32, -27, 14, 8);
+      ctx.fillRect(-32, 19, 14, 8);
+      ctx.fillRect(18, -27, 14, 8);
+      ctx.fillRect(18, 19, 14, 8);
+      // Vera's face in the cabin — big and panicking
       if (face.complete) {
         ctx.save();
-        ctx.rotate(-Math.PI / 2);
         ctx.beginPath();
-        ctx.arc(0, 0, 13, 0, Math.PI * 2);
+        ctx.arc(-2, 0, 16, 0, Math.PI * 2);
         ctx.clip();
-        ctx.drawImage(face, -14, -14, 28, 28);
+        ctx.drawImage(face, -19, -17, 34, 34);
         ctx.restore();
         ctx.strokeStyle = "#0f1115";
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 2.5;
         ctx.beginPath();
-        ctx.arc(0, 0, 13, 0, Math.PI * 2);
+        ctx.arc(-2, 0, 16, 0, Math.PI * 2);
+        ctx.stroke();
+        // steering wheel in front of her
+        ctx.strokeStyle = "#15171c";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(10, 0, 5, 0, Math.PI * 2);
         ctx.stroke();
       }
+      // L-plate on the back
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(-40, -7, 8, 14);
+      ctx.fillStyle = "#d9484a";
+      ctx.font = "bold 10px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("L", -36, 0);
       ctx.restore();
 
       if (playing) {
