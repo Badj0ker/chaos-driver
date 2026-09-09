@@ -162,11 +162,41 @@ export default function VeraDrivingGame() {
       const steer = (left ? -1 : 0) + (right ? 1 : 0);
       // deliberately twitchy steering: Vera cannot drive
       c.angle += steer * dt * 3.1 * Math.min(1, Math.abs(c.speed) / 120) * (c.speed < 0 ? -1 : 1);
-      c.x += Math.cos(c.angle) * c.speed * dt;
-      c.y += Math.sin(c.angle) * c.speed * dt;
-      c.x = Math.max(0, Math.min(WORLD, c.x));
-      c.y = Math.max(0, Math.min(WORLD, c.y));
+      const nx = Math.max(0, Math.min(WORLD, c.x + Math.cos(c.angle) * c.speed * dt));
+      const ny = Math.max(0, Math.min(WORLD, c.y + Math.sin(c.angle) * c.speed * dt));
+      // buildings block the car: off-road movement is a crash, not a shortcut
+      if ((onRoad(nx) || onRoad(ny)) && Math.abs(c.speed) >= 0) {
+        c.x = nx;
+        c.y = ny;
+      } else if (Math.abs(c.speed) > 60) {
+        c.shake = 1.2;
+        s.faults += 1;
+        s.chaos += 15;
+        c.speed *= -0.3;
+        for (let i = 0; i < 8; i++)
+          s.debris.push({ x: c.x, y: c.y, vx: rnd(-180, 180), vy: rnd(-180, 180), life: 0.7, color: "#c9c9c9" });
+        if (Math.random() < 0.5) say("That's a BUILDING, Vera!");
+        else say("Walls are not roads!");
+      } else {
+        c.speed = 0;
+      }
       c.shake = Math.max(0, c.shake - dt * 3);
+
+      // exam route checkpoints
+      if (!s.routeDone) {
+        const wp = s.route[s.routeIdx];
+        if (wp && Math.hypot(wp.x - c.x, wp.y - c.y) < 70) {
+          s.routeIdx++;
+          s.chaos += 150;
+          if (s.routeIdx >= s.route.length) {
+            s.routeDone = true;
+            s.chaos += 1000;
+            say("Route complete! Miracles happen.");
+          } else if (Math.random() < 0.6) {
+            say("Checkpoint! Keep going!");
+          }
+        }
+      }
 
       if (Math.abs(c.speed) > 220 && Math.abs(steer) > 0 && Math.random() < 0.5) {
         s.skid.push({ x: c.x, y: c.y, a: c.angle });
