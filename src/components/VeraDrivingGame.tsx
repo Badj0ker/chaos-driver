@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import veraAsset from "@/assets/vera.png.asset.json";
+import veraSrc from "@/assets/vera.png";
 
 type Ped = { x: number; y: number; dir: number; speed: number; alive: boolean; flyX: number; flyY: number; rot: number };
 type Prop = { x: number; y: number; kind: "cone" | "bin" | "hydrant" | "tree"; smashed: boolean };
@@ -120,7 +120,7 @@ export default function VeraDrivingGame() {
     if (!canvas) return;
     const ctx = canvas.getContext("2d")!;
     const face = new Image();
-    face.src = veraAsset.url;
+    face.src = veraSrc;
 
     let raf = 0;
     const resize = () => {
@@ -592,7 +592,7 @@ export default function VeraDrivingGame() {
           <div className="pointer-events-none absolute inset-x-0 top-0 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 p-3 sm:p-5">
             <div className="flex min-w-0 items-center gap-3">
               <div className="shrink-0 overflow-hidden rounded-full border-2 border-primary bg-card">
-                <img src={veraAsset.url} alt="Vera, the student driver" className="h-12 w-12 object-cover sm:h-14 sm:w-14" />
+                <img src={veraSrc} alt="Vera, the student driver" className="h-12 w-12 object-cover sm:h-14 sm:w-14" />
               </div>
               <div className="min-w-0 rounded-2xl bg-card/85 px-3 py-2 shadow-lg backdrop-blur">
                 <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Instructor</p>
@@ -635,7 +635,7 @@ export default function VeraDrivingGame() {
         <div className="absolute inset-0 grid place-items-center bg-background/80 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-3xl border border-border bg-card p-6 text-center shadow-2xl sm:p-8">
             <div className="mx-auto h-24 w-24 overflow-hidden rounded-full border-4 border-primary sm:h-28 sm:w-28">
-              <img src={veraAsset.url} alt="Vera the student driver" className="h-full w-full object-cover" />
+              <img src={veraSrc} alt="Vera the student driver" className="h-full w-full object-cover" />
             </div>
             {phase === "intro" ? (
               <>
