@@ -336,10 +336,38 @@ export default function VeraDrivingGame() {
         ctx.save();
         ctx.translate(oc.x - camX, oc.y - camY);
         ctx.rotate(oc.angle + (oc.wrecked ? 0.6 : 0));
-        ctx.fillStyle = oc.wrecked ? "#5a5a5a" : `hsl(${oc.hue}, 55%, 55%)`;
-        ctx.fillRect(-24, -13, 48, 26);
-        ctx.fillStyle = "rgba(0,0,0,0.35)";
-        ctx.fillRect(-6, -11, 14, 22);
+        // shadow
+        ctx.fillStyle = "rgba(0,0,0,0.3)";
+        ctx.fillRect(-30, -16, 62, 34);
+        // body
+        ctx.fillStyle = oc.wrecked ? "#5a5a5a" : `hsl(${oc.hue}, 60%, 52%)`;
+        ctx.beginPath();
+        ctx.roundRect(-32, -18, 62, 36, 8);
+        ctx.fill();
+        // cabin + windshield
+        ctx.fillStyle = oc.wrecked ? "#3a3a3a" : `hsl(${oc.hue}, 45%, 38%)`;
+        ctx.beginPath();
+        ctx.roundRect(-8, -14, 24, 28, 5);
+        ctx.fill();
+        ctx.fillStyle = oc.wrecked ? "#222" : "rgba(180,225,255,0.85)";
+        ctx.fillRect(14, -11, 8, 22);
+        ctx.fillRect(-14, -11, 5, 22);
+        // wheels
+        ctx.fillStyle = "#15171c";
+        ctx.fillRect(-26, -22, 12, 7);
+        ctx.fillRect(-26, 15, 12, 7);
+        ctx.fillRect(14, -22, 12, 7);
+        ctx.fillRect(14, 15, 12, 7);
+        if (oc.wrecked) {
+          ctx.strokeStyle = "rgba(255,140,60,0.9)";
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.moveTo(-20, -8);
+          ctx.lineTo(-6, 6);
+          ctx.moveTo(-6, -8);
+          ctx.lineTo(10, 8);
+          ctx.stroke();
+        }
         ctx.restore();
       }
 
@@ -347,14 +375,35 @@ export default function VeraDrivingGame() {
         if (!vis(p.x, p.y)) continue;
         ctx.save();
         ctx.translate(p.x - camX, p.y - camY);
-        ctx.rotate(p.rot);
+        ctx.rotate(p.alive ? p.dir + Math.PI / 2 : p.rot);
         if (!p.alive) ctx.globalAlpha = 0.85;
-        ctx.fillStyle = p.alive ? "#ffe1c4" : "#ffb3b3";
+        // shadow
+        ctx.fillStyle = "rgba(0,0,0,0.25)";
         ctx.beginPath();
-        ctx.arc(0, 0, 7, 0, Math.PI * 2);
+        ctx.ellipse(1, 2, 11, 8, 0, 0, Math.PI * 2);
         ctx.fill();
+        // body
         ctx.fillStyle = p.alive ? "#3b6ea5" : "#7a3b3b";
-        ctx.fillRect(-5, 5, 10, 9);
+        ctx.beginPath();
+        ctx.roundRect(-7, -4, 14, 18, 6);
+        ctx.fill();
+        // legs
+        ctx.fillStyle = "#2c3644";
+        ctx.fillRect(-6, 12, 5, 7);
+        ctx.fillRect(1, 12, 5, 7);
+        // arms
+        ctx.fillStyle = p.alive ? "#ffe1c4" : "#ffb3b3";
+        ctx.fillRect(-11, -2, 4, 11);
+        ctx.fillRect(7, -2, 4, 11);
+        // head
+        ctx.beginPath();
+        ctx.arc(0, -11, 7, 0, Math.PI * 2);
+        ctx.fill();
+        // hair
+        ctx.fillStyle = "#4a3525";
+        ctx.beginPath();
+        ctx.arc(0, -13, 6.5, Math.PI, 0);
+        ctx.fill();
         ctx.restore();
       }
 
