@@ -75,11 +75,19 @@ export default function VeraDrivingGame() {
       if (onRoad(x)) cars.push({ x: Math.floor(x / BLOCK) * BLOCK + ROAD / 2, y, angle: 0, wrecked: false, hue: rnd(0, 360) });
       else if (onRoad(y)) cars.push({ x, y: Math.floor(y / BLOCK) * BLOCK + ROAD / 2, angle: Math.PI / 2, wrecked: false, hue: rnd(0, 360) });
     }
+    // exam route: grid-line waypoints so every segment stays on a road
+    const routeGrid: [number, number][] = [
+      [0, 0], [3, 0], [3, 2], [1, 2], [1, 4], [4, 4], [4, 1], [6, 1], [6, 5], [2, 5], [2, 3], [0, 3],
+    ];
+    const route = routeGrid.map(([gx, gy]) => ({ x: gx * BLOCK + ROAD / 2, y: gy * BLOCK + ROAD / 2 }));
     stateRef.current = {
       car: { x: ROAD / 2, y: ROAD / 2, angle: 0, speed: 0, shake: 0 },
       peds,
       props,
       cars,
+      route,
+      routeIdx: 1,
+      routeDone: false,
       debris: [] as Debris[],
       skid: [] as { x: number; y: number; a: number }[],
       time: GAME_TIME,
