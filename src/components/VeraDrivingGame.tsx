@@ -336,10 +336,38 @@ export default function VeraDrivingGame() {
         ctx.save();
         ctx.translate(oc.x - camX, oc.y - camY);
         ctx.rotate(oc.angle + (oc.wrecked ? 0.6 : 0));
-        ctx.fillStyle = oc.wrecked ? "#5a5a5a" : `hsl(${oc.hue}, 55%, 55%)`;
-        ctx.fillRect(-24, -13, 48, 26);
-        ctx.fillStyle = "rgba(0,0,0,0.35)";
-        ctx.fillRect(-6, -11, 14, 22);
+        // shadow
+        ctx.fillStyle = "rgba(0,0,0,0.3)";
+        ctx.fillRect(-30, -16, 62, 34);
+        // body
+        ctx.fillStyle = oc.wrecked ? "#5a5a5a" : `hsl(${oc.hue}, 60%, 52%)`;
+        ctx.beginPath();
+        ctx.roundRect(-32, -18, 62, 36, 8);
+        ctx.fill();
+        // cabin + windshield
+        ctx.fillStyle = oc.wrecked ? "#3a3a3a" : `hsl(${oc.hue}, 45%, 38%)`;
+        ctx.beginPath();
+        ctx.roundRect(-8, -14, 24, 28, 5);
+        ctx.fill();
+        ctx.fillStyle = oc.wrecked ? "#222" : "rgba(180,225,255,0.85)";
+        ctx.fillRect(14, -11, 8, 22);
+        ctx.fillRect(-14, -11, 5, 22);
+        // wheels
+        ctx.fillStyle = "#15171c";
+        ctx.fillRect(-26, -22, 12, 7);
+        ctx.fillRect(-26, 15, 12, 7);
+        ctx.fillRect(14, -22, 12, 7);
+        ctx.fillRect(14, 15, 12, 7);
+        if (oc.wrecked) {
+          ctx.strokeStyle = "rgba(255,140,60,0.9)";
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.moveTo(-20, -8);
+          ctx.lineTo(-6, 6);
+          ctx.moveTo(-6, -8);
+          ctx.lineTo(10, 8);
+          ctx.stroke();
+        }
         ctx.restore();
       }
 
@@ -347,14 +375,35 @@ export default function VeraDrivingGame() {
         if (!vis(p.x, p.y)) continue;
         ctx.save();
         ctx.translate(p.x - camX, p.y - camY);
-        ctx.rotate(p.rot);
+        ctx.rotate(p.alive ? p.dir + Math.PI / 2 : p.rot);
         if (!p.alive) ctx.globalAlpha = 0.85;
-        ctx.fillStyle = p.alive ? "#ffe1c4" : "#ffb3b3";
+        // shadow
+        ctx.fillStyle = "rgba(0,0,0,0.25)";
         ctx.beginPath();
-        ctx.arc(0, 0, 7, 0, Math.PI * 2);
+        ctx.ellipse(1, 2, 11, 8, 0, 0, Math.PI * 2);
         ctx.fill();
+        // body
         ctx.fillStyle = p.alive ? "#3b6ea5" : "#7a3b3b";
-        ctx.fillRect(-5, 5, 10, 9);
+        ctx.beginPath();
+        ctx.roundRect(-7, -4, 14, 18, 6);
+        ctx.fill();
+        // legs
+        ctx.fillStyle = "#2c3644";
+        ctx.fillRect(-6, 12, 5, 7);
+        ctx.fillRect(1, 12, 5, 7);
+        // arms
+        ctx.fillStyle = p.alive ? "#ffe1c4" : "#ffb3b3";
+        ctx.fillRect(-11, -2, 4, 11);
+        ctx.fillRect(7, -2, 4, 11);
+        // head
+        ctx.beginPath();
+        ctx.arc(0, -11, 7, 0, Math.PI * 2);
+        ctx.fill();
+        // hair
+        ctx.fillStyle = "#4a3525";
+        ctx.beginPath();
+        ctx.arc(0, -13, 6.5, Math.PI, 0);
+        ctx.fill();
         ctx.restore();
       }
 
@@ -369,29 +418,65 @@ export default function VeraDrivingGame() {
       ctx.save();
       ctx.translate(c.x - camX, c.y - camY);
       ctx.rotate(c.angle);
+      // shadow
       ctx.fillStyle = "rgba(0,0,0,0.3)";
-      ctx.fillRect(-28, -14, 58, 30);
+      ctx.beginPath();
+      ctx.roundRect(-38, -20, 76, 42, 10);
+      ctx.fill();
+      // body
       ctx.fillStyle = "#ffd23f";
-      ctx.fillRect(-30, -16, 58, 30);
+      ctx.beginPath();
+      ctx.roundRect(-40, -22, 76, 44, 10);
+      ctx.fill();
+      // hood stripe + headlights
+      ctx.fillStyle = "rgba(0,0,0,0.12)";
+      ctx.fillRect(24, -22, 12, 44);
+      ctx.fillStyle = "#fff6c9";
+      ctx.fillRect(34, -18, 5, 8);
+      ctx.fillRect(34, 10, 5, 8);
+      // cabin
+      ctx.fillStyle = "#c9a227";
+      ctx.beginPath();
+      ctx.roundRect(-16, -18, 36, 36, 8);
+      ctx.fill();
+      // windshield
+      ctx.fillStyle = "rgba(190,230,255,0.9)";
+      ctx.fillRect(16, -14, 6, 28);
+      ctx.fillRect(-22, -14, 5, 28);
+      // wheels
       ctx.fillStyle = "#1c1f24";
-      ctx.fillRect(-30, -19, 12, 6);
-      ctx.fillRect(-30, 13, 12, 6);
-      ctx.fillRect(16, -19, 12, 6);
-      ctx.fillRect(16, 13, 12, 6);
+      ctx.fillRect(-32, -27, 14, 8);
+      ctx.fillRect(-32, 19, 14, 8);
+      ctx.fillRect(18, -27, 14, 8);
+      ctx.fillRect(18, 19, 14, 8);
+      // Vera's face in the cabin — big and panicking
       if (face.complete) {
         ctx.save();
-        ctx.rotate(-Math.PI / 2);
         ctx.beginPath();
-        ctx.arc(0, 0, 13, 0, Math.PI * 2);
+        ctx.arc(-2, 0, 16, 0, Math.PI * 2);
         ctx.clip();
-        ctx.drawImage(face, -14, -14, 28, 28);
+        ctx.drawImage(face, -19, -17, 34, 34);
         ctx.restore();
         ctx.strokeStyle = "#0f1115";
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 2.5;
         ctx.beginPath();
-        ctx.arc(0, 0, 13, 0, Math.PI * 2);
+        ctx.arc(-2, 0, 16, 0, Math.PI * 2);
+        ctx.stroke();
+        // steering wheel in front of her
+        ctx.strokeStyle = "#15171c";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(10, 0, 5, 0, Math.PI * 2);
         ctx.stroke();
       }
+      // L-plate on the back
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(-40, -7, 8, 14);
+      ctx.fillStyle = "#d9484a";
+      ctx.font = "bold 10px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("L", -36, 0);
       ctx.restore();
 
       if (playing) {
