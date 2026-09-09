@@ -67,7 +67,7 @@ export default function VeraDrivingGame() {
       const x = rnd(0, WORLD);
       const y = rnd(0, WORLD);
       const kinds: Prop["kind"][] = ["cone", "bin", "hydrant", "tree"];
-      props.push({ x, y, kind: kinds[Math.floor(rnd(0, 4))], smashed: false });
+      props.push({ x, y, kind: kinds[Math.floor(rnd(0, 4))]!, smashed: false });
     }
     for (let i = 0; i < 60; i++) {
       const x = rnd(0, WORLD);
@@ -187,7 +187,7 @@ export default function VeraDrivingGame() {
             c.shake = 1;
             for (let i = 0; i < 8; i++)
               s.debris.push({ x: p.x, y: p.y, vx: rnd(-160, 160), vy: rnd(-160, 160), life: 0.8, color: "#ffd166" });
-            say(FAULT_LINES[Math.floor(Math.random() * FAULT_LINES.length)]);
+            say(FAULT_LINES[Math.floor(Math.random() * FAULT_LINES.length)]!);
           }
         } else {
           p.x += p.flyX * dt;
@@ -208,7 +208,7 @@ export default function VeraDrivingGame() {
           c.speed *= 0.82;
           for (let i = 0; i < 6; i++)
             s.debris.push({ x: p.x, y: p.y, vx: rnd(-120, 120), vy: rnd(-120, 120), life: 0.6, color: "#8de1ff" });
-          if (Math.random() < 0.35) say(FAULT_LINES[Math.floor(Math.random() * FAULT_LINES.length)]);
+          if (Math.random() < 0.35) say(FAULT_LINES[Math.floor(Math.random() * FAULT_LINES.length)]!);
         }
       }
       // parked cars
@@ -233,7 +233,7 @@ export default function VeraDrivingGame() {
       s.debris = s.debris.filter((d: Debris) => d.life > 0);
 
       s.speechT -= dt;
-      if (s.speechT <= 0 && playing) say(IDLE_LINES[Math.floor(Math.random() * IDLE_LINES.length)]);
+      if (s.speechT <= 0 && playing) say(IDLE_LINES[Math.floor(Math.random() * IDLE_LINES.length)]!);
 
       if (playing) {
         s.time -= dt;
