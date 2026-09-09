@@ -1,24 +1,24 @@
 import { createFileRoute } from "@tanstack/react-router";
+import VeraDrivingGame from "@/components/VeraDrivingGame";
 
-// No head() here: the home route inherits title/description/og/twitter from
-// __root.tsx, and ships no og:image so serve-time hosting can inject the
-// project's social preview (explicit og:image or latest screenshot).
 export const Route = createFileRoute("/")({
-  component: Index,
+  ssr: false,
+  head: () => ({
+    meta: [
+      { title: "Vera's Driving Exam — Chaotic Meme Driving Game" },
+      {
+        name: "description",
+        content:
+          "Help Vera fail her driving exam in style: 60 seconds of top-down city chaos, flying pedestrians and a screaming instructor. Play on mobile or desktop.",
+      },
+      { property: "og:title", content: "Vera's Driving Exam — Chaotic Meme Driving Game" },
+      {
+        property: "og:description",
+        content: "60 seconds. One city. Zero talent. Rack up Chaos points and fail the exam spectacularly.",
+      },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
+    ],
+  }),
+  component: VeraDrivingGame,
 });
-
-// IMPORTANT: Replace this placeholder. See ./README.md for routing conventions.
-function Index() {
-  return (
-    <div
-      className="flex min-h-screen items-center justify-center"
-      style={{ backgroundColor: "#fcfbf8" }}
-    >
-      <img
-        data-lovable-blank-page-placeholder="REMOVE_THIS"
-        src="https://cdn.gpteng.co/blank-app-v1.svg"
-        alt="Your app will live here!"
-      />
-    </div>
-  );
-}
