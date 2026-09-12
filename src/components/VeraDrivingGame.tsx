@@ -1,688 +1,711 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Gauge, RotateCcw } from "lucide-react";
 import veraAsset from "@/assets/vera.png.asset.json";
 
-type Ped = { x: number; y: number; dir: number; speed: number; alive: boolean; flyX: number; flyY: number; rot: number };
-type Prop = { x: number; y: number; kind: "cone" | "bin" | "hydrant" | "tree"; smashed: boolean };
-type Car = { x: number; y: number; angle: number; wrecked: boolean; hue: number };
-type Debris = { x: number; y: number; vx: number; vy: number; life: number; color: string };
+type Phase = "intro" | "playing" | "over";
+type ObstacleKind = "ped" | "car" | "bin" | "cone";
+type Obstacle = {
+  id: number;
+  kind: ObstacleKind;
+  lane: number;
+  z: number;
+  hit: boolean;
+  color: string;
+};
+type FlyingHit = {
+  id: number;
+  kind: ObstacleKind;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  rot: number;
+  spin: number;
+  life: number;
+  color: string;
+};
+type GameState = {
+  speed: number;
+  lateral: number;
+  steer: number;
+  distance: number;
+  time: number;
+  faults: number;
+  chaos: number;
+  speech: string;
+  speechT: number;
+  shake: number;
+  flash: number;
+  crack: number;
+  checkpoint: number;
+  nextSpawn: number;
+  nextId: number;
+  obstacles: Obstacle[];
+  flying: FlyingHit[];
+  last: number;
+};
 
-const ROAD = 110;
-const BLOCK = 460;
-const WORLD = 5200;
 const GAME_TIME = 60;
-
+const DRAW_DISTANCE = 1150;
+const COLORS = ["#e64d4d", "#4f9bd8", "#52a96f", "#ef9f32", "#be6cce"];
 const FAULT_LINES = [
-  "Vera, that was a person!",
+  "VERA! That person had plans!",
   "The brake is the OTHER pedal!",
-  "Mirrors! Signal! ...Anything!",
   "That bin had a family, Vera.",
-  "We call this 'parking'? Really?",
-  "I'm noting that down. In red.",
-  "Legally, I have to scream now.",
-  "Sidewalks are not shortcuts!",
-  "You just invented a new lane.",
-  "My insurance guy is crying.",
+  "I am updating my will.",
+  "Technically, that was a pavement.",
+  "My clipboard just resigned.",
+  "Mirrors! Signal! ANYTHING!",
+  "That car was already parked!",
+  "Please stop collecting pedestrians!",
+  "This is an exam, not a demolition derby!",
 ];
 const IDLE_LINES = [
-  "Hands at ten and two, Vera.",
-  "Take a breath. Please.",
-  "Nice and slow... oh no.",
-  "Speed limit is a limit.",
+  "Nice and steady... suspiciously steady.",
+  "Hands at ten and two. Not one and seven.",
+  "The speed limit is not a challenge.",
+  "Eyes on the road, Vera. THE ROAD.",
 ];
 
-function rnd(a: number, b: number) {
-  return a + Math.random() * (b - a);
+function randomBetween(min: number, max: number) {
+  return min + Math.random() * (max - min);
 }
-function onRoad(v: number) {
-  const m = ((v % BLOCK) + BLOCK) % BLOCK;
-  return m < ROAD;
+
+function roadCurveAt(distance: number) {
+  return Math.sin(distance / 720) * 0.55 + Math.sin(distance / 310) * 0.2;
+}
+
+function roadCenterAt(distance: number, z: number) {
+  const near = roadCurveAt(distance);
+  const far = roadCurveAt(distance + z);
+  return (far - near) * z * 0.62;
+}
+
+function makeObstacle(id: number, distance: number): Obstacle {
+  const roll = Math.random();
+  const kind: ObstacleKind = roll < 0.44 ? "ped" : roll < 0.67 ? "car" : roll < 0.84 ? "bin" : "cone";
+  return {
+    id,
+    kind,
+    lane: randomBetween(-0.86, 0.86),
+    z: distance + randomBetween(650, 1050),
+    hit: false,
+    color: COLORS[Math.floor(Math.random() * COLORS.length)] ?? COLORS[0],
+  };
 }
 
 export default function VeraDrivingGame() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [phase, setPhase] = useState<"intro" | "playing" | "over">("intro");
-  const [hud, setHud] = useState({ time: GAME_TIME, faults: 0, chaos: 0, speech: "Start the engine, Vera." });
-  const [best, setBest] = useState(0);
-  const stateRef = useRef<any>(null);
+  const stateRef = useRef<GameState | null>(null);
   const keysRef = useRef<Record<string, boolean>>({});
   const touchRef = useRef({ left: false, right: false, gas: false, brake: false });
-  const phaseRef = useRef(phase);
-  phaseRef.current = phase;
+  const phaseRef = useRef<Phase>("intro");
+  const [phase, setPhase] = useState<Phase>("intro");
+  const [best, setBest] = useState(0);
+  const [hud, setHud] = useState({ time: GAME_TIME, faults: 0, chaos: 0, speed: 0, speech: "Try not to kill anyone." });
 
   useEffect(() => {
-    const v = Number(localStorage.getItem("vera-best") || 0);
-    if (v) setBest(v);
+    const saved = Number(localStorage.getItem("vera-best") ?? 0);
+    if (saved > 0) setBest(saved);
   }, []);
 
   const startGame = useCallback(() => {
-    const peds: Ped[] = [];
-    const props: Prop[] = [];
-    const cars: Car[] = [];
-    for (let i = 0; i < 240; i++) {
-      const x = rnd(0, WORLD);
-      const y = rnd(0, WORLD);
-      if (onRoad(x) || onRoad(y)) peds.push({ x, y, dir: rnd(0, Math.PI * 2), speed: rnd(12, 34), alive: true, flyX: 0, flyY: 0, rot: 0 });
-    }
-    for (let i = 0; i < 320; i++) {
-      const x = rnd(0, WORLD);
-      const y = rnd(0, WORLD);
-      const kinds: Prop["kind"][] = ["cone", "bin", "hydrant", "tree"];
-      props.push({ x, y, kind: kinds[Math.floor(rnd(0, 4))]!, smashed: false });
-    }
-    for (let i = 0; i < 60; i++) {
-      const x = rnd(0, WORLD);
-      const y = rnd(0, WORLD);
-      if (onRoad(x)) cars.push({ x: Math.floor(x / BLOCK) * BLOCK + ROAD / 2, y, angle: 0, wrecked: false, hue: rnd(0, 360) });
-      else if (onRoad(y)) cars.push({ x, y: Math.floor(y / BLOCK) * BLOCK + ROAD / 2, angle: Math.PI / 2, wrecked: false, hue: rnd(0, 360) });
-    }
-    // exam route: grid-line waypoints so every segment stays on a road
-    const routeGrid: [number, number][] = [
-      [0, 0], [3, 0], [3, 2], [1, 2], [1, 4], [4, 4], [4, 1], [6, 1], [6, 5], [2, 5], [2, 3], [0, 3],
-    ];
-    const route = routeGrid.map(([gx, gy]) => ({ x: gx * BLOCK + ROAD / 2, y: gy * BLOCK + ROAD / 2 }));
+    const initialObstacles = Array.from({ length: 13 }, (_, index) => makeObstacle(index, index * 105));
     stateRef.current = {
-      car: { x: ROAD / 2, y: ROAD / 2, angle: 0, speed: 0, shake: 0 },
-      peds,
-      props,
-      cars,
-      route,
-      routeIdx: 1,
-      routeDone: false,
-      debris: [] as Debris[],
-      skid: [] as { x: number; y: number; a: number }[],
+      speed: 0,
+      lateral: 0,
+      steer: 0,
+      distance: 0,
       time: GAME_TIME,
       faults: 0,
       chaos: 0,
-      speech: "Green light. Go gently.",
+      speech: "First gear. Nice and gently, Vera.",
       speechT: 3,
+      shake: 0,
+      flash: 0,
+      crack: 0,
+      checkpoint: 1,
+      nextSpawn: 1200,
+      nextId: 20,
+      obstacles: initialObstacles,
+      flying: [],
       last: performance.now(),
     };
-    setHud({ time: GAME_TIME, faults: 0, chaos: 0, speech: "Green light. Go gently." });
+    setHud({ time: GAME_TIME, faults: 0, chaos: 0, speed: 0, speech: "First gear. Nice and gently, Vera." });
+    phaseRef.current = "playing";
     setPhase("playing");
   }, []);
 
   useEffect(() => {
-    const kd = (e: KeyboardEvent) => {
-      keysRef.current[e.key.toLowerCase()] = true;
-      if ([" ", "arrowup", "arrowdown", "arrowleft", "arrowright"].includes(e.key.toLowerCase())) e.preventDefault();
+    const keyDown = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase();
+      keysRef.current[key] = true;
+      if (["arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(key)) event.preventDefault();
     };
-    const ku = (e: KeyboardEvent) => (keysRef.current[e.key.toLowerCase()] = false);
-    window.addEventListener("keydown", kd, { passive: false });
-    window.addEventListener("keyup", ku);
+    const keyUp = (event: KeyboardEvent) => {
+      keysRef.current[event.key.toLowerCase()] = false;
+    };
+    window.addEventListener("keydown", keyDown, { passive: false });
+    window.addEventListener("keyup", keyUp);
     return () => {
-      window.removeEventListener("keydown", kd);
-      window.removeEventListener("keyup", ku);
+      window.removeEventListener("keydown", keyDown);
+      window.removeEventListener("keyup", keyUp);
     };
   }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext("2d")!;
+    const context = canvas.getContext("2d");
+    if (!context) return;
     const face = new Image();
     face.src = veraAsset.url;
+    let frame = 0;
 
-    let raf = 0;
     const resize = () => {
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      canvas.width = canvas.clientWidth * dpr;
-      canvas.height = canvas.clientHeight * dpr;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const ratio = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = Math.round(canvas.clientWidth * ratio);
+      canvas.height = Math.round(canvas.clientHeight * ratio);
+      context.setTransform(ratio, 0, 0, ratio, 0, 0);
     };
     resize();
     window.addEventListener("resize", resize);
 
-    const loop = (now: number) => {
-      raf = requestAnimationFrame(loop);
-      const s = stateRef.current;
-      const W = canvas.clientWidth;
-      const H = canvas.clientHeight;
-      if (!s) {
-        ctx.fillStyle = "#101820";
-        ctx.fillRect(0, 0, W, H);
-        return;
+    const say = (state: GameState, line: string) => {
+      state.speech = line;
+      state.speechT = 2.6;
+    };
+
+    const drawPerson = (ctx: CanvasRenderingContext2D, x: number, y: number, scale: number, color: string, rotation = 0) => {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(rotation);
+      ctx.scale(scale, scale);
+      ctx.fillStyle = "rgba(0,0,0,.28)";
+      ctx.beginPath();
+      ctx.ellipse(0, 14, 12, 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#28252e";
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(-4, 8);
+      ctx.lineTo(-8, 20);
+      ctx.moveTo(4, 8);
+      ctx.lineTo(9, 20);
+      ctx.stroke();
+      ctx.strokeStyle = "#ffd8b8";
+      ctx.beginPath();
+      ctx.moveTo(-6, -3);
+      ctx.lineTo(-14, 6);
+      ctx.moveTo(6, -3);
+      ctx.lineTo(14, 4);
+      ctx.stroke();
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.roundRect(-8, -8, 16, 19, 5);
+      ctx.fill();
+      ctx.fillStyle = "#ffd8b8";
+      ctx.beginPath();
+      ctx.arc(0, -15, 7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#4c3027";
+      ctx.beginPath();
+      ctx.arc(0, -17, 7, Math.PI, 0);
+      ctx.fill();
+      ctx.restore();
+    };
+
+    const drawRoadside = (ctx: CanvasRenderingContext2D, width: number, horizon: number, roadBottom: number, state: GameState) => {
+      for (let i = 0; i < 22; i++) {
+        const worldZ = ((i * 83 - state.distance * 0.65) % 1826 + 1826) % 1826;
+        const depth = 1 - worldZ / 1826;
+        const eased = depth * depth;
+        const y = horizon + eased * (roadBottom - horizon);
+        const center = width / 2 + roadCenterAt(state.distance, worldZ) * (1 - depth) - state.lateral * eased * width * 0.2;
+        const roadHalf = 28 + eased * width * 0.45;
+        const buildingScale = 0.15 + eased * 1.5;
+        const side = i % 2 === 0 ? -1 : 1;
+        const bx = center + side * (roadHalf + 32 + eased * 100);
+        ctx.fillStyle = i % 3 === 0 ? "#c75c4b" : i % 3 === 1 ? "#e1b65a" : "#5b8a91";
+        const bw = 50 * buildingScale;
+        const bh = (60 + (i % 4) * 14) * buildingScale;
+        ctx.fillRect(bx - bw / 2, y - bh, bw, bh);
+        ctx.fillStyle = "rgba(255,239,160,.55)";
+        const windowSize = Math.max(2, 5 * buildingScale);
+        ctx.fillRect(bx - bw * 0.25, y - bh * 0.72, windowSize, windowSize);
+        ctx.fillRect(bx + bw * 0.13, y - bh * 0.72, windowSize, windowSize);
+        if (i % 3 === 0) {
+          ctx.fillStyle = "#39754d";
+          ctx.beginPath();
+          ctx.arc(center - side * (roadHalf + 13), y - 11 * buildingScale, 13 * buildingScale, 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
-      let dt = Math.min((now - s.last) / 1000, 0.05);
-      s.last = now;
-      const playing = phaseRef.current === "playing";
-      if (!playing) dt = 0;
+    };
 
-      const k = keysRef.current;
-      const t = touchRef.current;
-      const gas = k["arrowup"] || k["w"] || t.gas;
-      const brake = k["arrowdown"] || k["s"] || t.brake;
-      const left = k["arrowleft"] || k["a"] || t.left;
-      const right = k["arrowright"] || k["d"] || t.right;
-
-      const c = s.car;
-      if (gas) c.speed += 460 * dt;
-      else if (brake) c.speed -= 520 * dt;
-      else c.speed *= Math.exp(-0.8 * dt);
-      c.speed = Math.max(-160, Math.min(560, c.speed));
-      const say = (line: string) => {
-        s.speech = line;
-        s.speechT = 2.4;
-      };
-
-      const steer = (left ? -1 : 0) + (right ? 1 : 0);
-      // deliberately twitchy steering: Vera cannot drive
-      c.angle += steer * dt * 3.1 * Math.min(1, Math.abs(c.speed) / 120) * (c.speed < 0 ? -1 : 1);
-      const nx = Math.max(0, Math.min(WORLD, c.x + Math.cos(c.angle) * c.speed * dt));
-      const ny = Math.max(0, Math.min(WORLD, c.y + Math.sin(c.angle) * c.speed * dt));
-      // buildings block the car: off-road movement is a crash, not a shortcut
-      if ((onRoad(nx) || onRoad(ny)) && Math.abs(c.speed) >= 0) {
-        c.x = nx;
-        c.y = ny;
-      } else if (Math.abs(c.speed) > 60) {
-        c.shake = 1.2;
-        s.faults += 1;
-        s.chaos += 15;
-        c.speed *= -0.3;
-        for (let i = 0; i < 8; i++)
-          s.debris.push({ x: c.x, y: c.y, vx: rnd(-180, 180), vy: rnd(-180, 180), life: 0.7, color: "#c9c9c9" });
-        if (Math.random() < 0.5) say("That's a BUILDING, Vera!");
-        else say("Walls are not roads!");
+    const drawObstacle = (ctx: CanvasRenderingContext2D, obstacle: Obstacle, state: GameState, width: number, horizon: number, roadBottom: number) => {
+      const relativeZ = obstacle.z - state.distance;
+      if (relativeZ < 0 || relativeZ > DRAW_DISTANCE) return;
+      const depth = 1 - relativeZ / DRAW_DISTANCE;
+      const eased = depth * depth;
+      const y = horizon + eased * (roadBottom - horizon);
+      const center = width / 2 + roadCenterAt(state.distance, relativeZ) * (1 - depth) - state.lateral * eased * width * 0.2;
+      const roadHalf = 24 + eased * width * 0.43;
+      const x = center + obstacle.lane * roadHalf * 0.72;
+      const scale = 0.12 + eased * 1.48;
+      if (obstacle.kind === "ped") {
+        drawPerson(ctx, x, y, scale, obstacle.color);
+      } else if (obstacle.kind === "car") {
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.scale(scale, scale);
+        ctx.fillStyle = "rgba(0,0,0,.3)";
+        ctx.beginPath();
+        ctx.ellipse(0, 15, 24, 6, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = obstacle.color;
+        ctx.beginPath();
+        ctx.roundRect(-24, -12, 48, 28, 7);
+        ctx.fill();
+        ctx.fillStyle = "#bfe5ef";
+        ctx.beginPath();
+        ctx.roundRect(-15, -25, 30, 17, 5);
+        ctx.fill();
+        ctx.fillStyle = "#f7e988";
+        ctx.fillRect(-19, 8, 8, 5);
+        ctx.fillRect(11, 8, 8, 5);
+        ctx.restore();
+      } else if (obstacle.kind === "bin") {
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.scale(scale, scale);
+        ctx.fillStyle = "#34745b";
+        ctx.beginPath();
+        ctx.roundRect(-13, -27, 26, 35, 3);
+        ctx.fill();
+        ctx.fillStyle = "#223e35";
+        ctx.fillRect(-16, -30, 32, 6);
+        ctx.restore();
       } else {
-        c.speed = 0;
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.scale(scale, scale);
+        ctx.fillStyle = "#f27632";
+        ctx.beginPath();
+        ctx.moveTo(0, -27);
+        ctx.lineTo(14, 8);
+        ctx.lineTo(-14, 8);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = "#f7f2db";
+        ctx.fillRect(-10, -4, 20, 5);
+        ctx.restore();
       }
-      c.shake = Math.max(0, c.shake - dt * 3);
+    };
 
-      // exam route checkpoints
-      if (!s.routeDone) {
-        const wp = s.route[s.routeIdx];
-        if (wp && Math.hypot(wp.x - c.x, wp.y - c.y) < 70) {
-          s.routeIdx++;
-          s.chaos += 150;
-          if (s.routeIdx >= s.route.length) {
-            s.routeDone = true;
-            s.chaos += 1000;
-            say("Route complete! Miracles happen.");
-          } else if (Math.random() < 0.6) {
-            say("Checkpoint! Keep going!");
-          }
-        }
-      }
+    const loop = (now: number) => {
+      frame = requestAnimationFrame(loop);
+      const width = canvas.clientWidth;
+      const height = canvas.clientHeight;
+      const state = stateRef.current;
+      const playing = phaseRef.current === "playing";
+      let delta = state ? Math.min((now - state.last) / 1000, 0.05) : 0;
+      if (state) state.last = now;
+      if (!playing) delta = 0;
 
-      if (Math.abs(c.speed) > 220 && Math.abs(steer) > 0 && Math.random() < 0.5) {
-        s.skid.push({ x: c.x, y: c.y, a: c.angle });
-        if (s.skid.length > 260) s.skid.shift();
-      }
+      if (state && playing) {
+        const keys = keysRef.current;
+        const touch = touchRef.current;
+        const gas = Boolean(keys.arrowup || keys.w || touch.gas);
+        const brake = Boolean(keys.arrowdown || keys.s || touch.brake);
+        const steerInput = (keys.arrowleft || keys.a || touch.left ? -1 : 0) + (keys.arrowright || keys.d || touch.right ? 1 : 0);
+        state.steer += (steerInput - state.steer) * Math.min(1, delta * 8);
+        if (gas) state.speed += 54 * delta;
+        else if (brake) state.speed -= 72 * delta;
+        else state.speed *= Math.exp(-0.8 * delta);
+        state.speed = Math.max(0, Math.min(145, state.speed));
+        state.lateral += state.steer * delta * (0.55 + state.speed / 75);
+        state.distance += state.speed * delta * 3.1;
+        state.shake = Math.max(0, state.shake - delta * 3.2);
+        state.flash = Math.max(0, state.flash - delta * 4.5);
+        state.crack = Math.max(0, state.crack - delta * 0.045);
 
-      // pedestrians
-      for (const p of s.peds) {
-        if (p.alive) {
-          p.x += Math.cos(p.dir) * p.speed * dt;
-          p.y += Math.sin(p.dir) * p.speed * dt;
-          if (Math.random() < 0.01) p.dir += rnd(-1, 1);
-          const d = Math.hypot(p.x - c.x, p.y - c.y);
-          if (d < 26 && Math.abs(c.speed) > 40) {
-            p.alive = false;
-            const a = Math.atan2(p.y - c.y, p.x - c.x);
-            p.flyX = Math.cos(a) * (140 + Math.abs(c.speed));
-            p.flyY = Math.sin(a) * (140 + Math.abs(c.speed));
-            s.faults += 3;
-            s.chaos += 100;
-            c.shake = 1;
-            for (let i = 0; i < 8; i++)
-              s.debris.push({ x: p.x, y: p.y, vx: rnd(-160, 160), vy: rnd(-160, 160), life: 0.8, color: "#ffd166" });
-            say(FAULT_LINES[Math.floor(Math.random() * FAULT_LINES.length)]!);
-          }
+        if (Math.abs(state.lateral) > 1.03 && state.speed > 35) {
+          state.lateral = Math.sign(state.lateral) * 1.03;
+          state.speed *= 0.67;
+          state.shake = 0.8;
+          state.faults += 1;
+          state.chaos += 15;
+          say(state, Math.random() > 0.5 ? "Pavement is not an extra lane!" : "That hedge did nothing to you!");
         } else {
-          p.x += p.flyX * dt;
-          p.y += p.flyY * dt;
-          p.flyX *= Math.exp(-2.4 * dt);
-          p.flyY *= Math.exp(-2.4 * dt);
-          p.rot += dt * 9;
+          state.lateral = Math.max(-1.12, Math.min(1.12, state.lateral));
         }
-      }
-      // props
-      for (const p of s.props) {
-        if (p.smashed) continue;
-        if (Math.hypot(p.x - c.x, p.y - c.y) < 24 && Math.abs(c.speed) > 30) {
-          p.smashed = true;
-          s.chaos += 30;
-          s.faults += 1;
-          c.shake = 0.6;
-          c.speed *= 0.82;
-          for (let i = 0; i < 6; i++)
-            s.debris.push({ x: p.x, y: p.y, vx: rnd(-120, 120), vy: rnd(-120, 120), life: 0.6, color: "#8de1ff" });
-          if (Math.random() < 0.35) say(FAULT_LINES[Math.floor(Math.random() * FAULT_LINES.length)]!);
-        }
-      }
-      // parked cars
-      for (const oc of s.cars) {
-        if (oc.wrecked) continue;
-        if (Math.hypot(oc.x - c.x, oc.y - c.y) < 42 && Math.abs(c.speed) > 60) {
-          oc.wrecked = true;
-          s.chaos += 250;
-          s.faults += 5;
-          c.shake = 1.4;
-          c.speed *= -0.35;
-          for (let i = 0; i < 14; i++)
-            s.debris.push({ x: oc.x, y: oc.y, vx: rnd(-240, 240), vy: rnd(-240, 240), life: 1, color: "#ff8a5b" });
-          say("THAT WAS A PARKED CAR, VERA!");
-        }
-      }
-      for (const d of s.debris) {
-        d.x += d.vx * dt;
-        d.y += d.vy * dt;
-        d.life -= dt;
-      }
-      s.debris = s.debris.filter((d: Debris) => d.life > 0);
 
-      s.speechT -= dt;
-      if (s.speechT <= 0 && playing) say(IDLE_LINES[Math.floor(Math.random() * IDLE_LINES.length)]!);
+        if (state.distance > state.nextSpawn) {
+          for (let index = 0; index < 3; index++) {
+            state.obstacles.push(makeObstacle(state.nextId, state.distance + index * 105));
+            state.nextId += 1;
+          }
+          state.nextSpawn = state.distance + randomBetween(380, 580);
+        }
 
-      if (playing) {
-        s.time -= dt;
-        if (s.time <= 0) {
-          s.time = 0;
-          const score = Math.round(s.chaos);
-          const prev = Number(localStorage.getItem("vera-best") || 0);
-          if (score > prev) {
+        for (const obstacle of state.obstacles) {
+          const relativeZ = obstacle.z - state.distance;
+          if (!obstacle.hit && relativeZ < 34 && relativeZ > -18 && Math.abs(obstacle.lane - state.lateral * 0.82) < (obstacle.kind === "car" ? 0.34 : 0.25)) {
+            obstacle.hit = true;
+            const impact = obstacle.kind === "car" ? 250 : obstacle.kind === "ped" ? 100 : 35;
+            const faults = obstacle.kind === "car" ? 5 : obstacle.kind === "ped" ? 3 : 1;
+            state.chaos += impact;
+            state.faults += faults;
+            state.shake = obstacle.kind === "car" ? 1.5 : 1;
+            state.flash = 1;
+            state.crack = Math.min(1, state.crack + (obstacle.kind === "car" ? 0.45 : 0.18));
+            state.speed *= obstacle.kind === "car" ? 0.42 : 0.82;
+            state.flying.push({
+              id: obstacle.id,
+              kind: obstacle.kind,
+              x: width / 2 + obstacle.lane * width * 0.21,
+              y: height * 0.52,
+              vx: randomBetween(-180, 180),
+              vy: randomBetween(-520, -350),
+              rot: 0,
+              spin: randomBetween(-8, 8),
+              life: 1.35,
+              color: obstacle.color,
+            });
+            say(state, FAULT_LINES[Math.floor(Math.random() * FAULT_LINES.length)] ?? FAULT_LINES[0]);
+          }
+        }
+        state.obstacles = state.obstacles.filter((obstacle) => obstacle.z > state.distance - 100 && !obstacle.hit);
+
+        for (const hit of state.flying) {
+          hit.x += hit.vx * delta;
+          hit.y += hit.vy * delta;
+          hit.vy += 780 * delta;
+          hit.rot += hit.spin * delta;
+          hit.life -= delta;
+        }
+        state.flying = state.flying.filter((hit) => hit.life > 0);
+        state.speechT -= delta;
+        if (state.speechT <= 0) say(state, IDLE_LINES[Math.floor(Math.random() * IDLE_LINES.length)] ?? IDLE_LINES[0]);
+
+        const newCheckpoint = Math.floor(state.distance / 1500) + 1;
+        if (newCheckpoint > state.checkpoint) {
+          state.checkpoint = newCheckpoint;
+          state.chaos += 150;
+          say(state, "Checkpoint! Somehow, we're still moving!");
+        }
+
+        state.time -= delta;
+        if (state.time <= 0) {
+          state.time = 0;
+          const score = Math.round(state.chaos);
+          const previous = Number(localStorage.getItem("vera-best") ?? 0);
+          if (score > previous) {
             localStorage.setItem("vera-best", String(score));
             setBest(score);
           }
+          phaseRef.current = "over";
           setPhase("over");
         }
-      }
-
-      // ---------- render ----------
-      const camX = c.x - W / 2 + (c.shake ? rnd(-8, 8) * c.shake : 0);
-      const camY = c.y - H / 2 + (c.shake ? rnd(-8, 8) * c.shake : 0);
-      ctx.fillStyle = "#39543f";
-      ctx.fillRect(0, 0, W, H);
-
-      const startX = Math.floor(camX / BLOCK) * BLOCK;
-      const startY = Math.floor(camY / BLOCK) * BLOCK;
-      ctx.fillStyle = "#2c3238";
-      for (let x = startX; x < camX + W + BLOCK; x += BLOCK) ctx.fillRect(x - camX, 0, ROAD, H);
-      for (let y = startY; y < camY + H + BLOCK; y += BLOCK) ctx.fillRect(0, y - camY, W, ROAD);
-      // buildings
-      for (let x = startX; x < camX + W + BLOCK; x += BLOCK)
-        for (let y = startY; y < camY + H + BLOCK; y += BLOCK) {
-          const bx = x + ROAD + 18 - camX;
-          const by = y + ROAD + 18 - camY;
-          const size = BLOCK - ROAD - 60;
-          const hue = ((x * 7 + y * 13) / BLOCK) % 40;
-          ctx.fillStyle = `hsl(${30 + hue}, 12%, ${26 + (hue % 8)}%)`;
-          ctx.fillRect(bx, by, size, size);
-          ctx.fillStyle = "rgba(255,220,150,0.13)";
-          for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) ctx.fillRect(bx + 22 + i * 60, by + 22 + j * 60, 26, 26);
-        }
-      // lane dashes
-      ctx.strokeStyle = "rgba(255,255,255,0.35)";
-      ctx.setLineDash([18, 22]);
-      ctx.lineWidth = 3;
-      for (let x = startX; x < camX + W + BLOCK; x += BLOCK) {
-        ctx.beginPath();
-        ctx.moveTo(x + ROAD / 2 - camX, 0);
-        ctx.lineTo(x + ROAD / 2 - camX, H);
-        ctx.stroke();
-      }
-      for (let y = startY; y < camY + H + BLOCK; y += BLOCK) {
-        ctx.beginPath();
-        ctx.moveTo(0, y + ROAD / 2 - camY);
-        ctx.lineTo(W, y + ROAD / 2 - camY);
-        ctx.stroke();
-      }
-      ctx.setLineDash([]);
-
-      // exam route: gold dashed line through remaining waypoints
-      if (!s.routeDone) {
-        ctx.strokeStyle = "rgba(255,210,63,0.75)";
-        ctx.lineWidth = 8;
-        ctx.setLineDash([16, 14]);
-        ctx.lineCap = "round";
-        ctx.beginPath();
-        ctx.moveTo(c.x - camX, c.y - camY);
-        for (let i = s.routeIdx; i < s.route.length; i++) ctx.lineTo(s.route[i].x - camX, s.route[i].y - camY);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        // pulsing next checkpoint
-        const wp = s.route[s.routeIdx];
-        const pulse = 16 + Math.sin(now / 180) * 5;
-        ctx.fillStyle = "rgba(255,210,63,0.35)";
-        ctx.beginPath();
-        ctx.arc(wp.x - camX, wp.y - camY, pulse + 12, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = "#ffd23f";
-        ctx.beginPath();
-        ctx.arc(wp.x - camX, wp.y - camY, pulse * 0.6, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = "#101820";
-        ctx.font = "black 16px sans-serif";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText(String(s.routeIdx), wp.x - camX, wp.y - camY);
-      }
-
-      // skid marks
-      ctx.strokeStyle = "rgba(0,0,0,0.35)";
-      ctx.lineWidth = 5;
-      for (const sk of s.skid) {
-        ctx.beginPath();
-        ctx.moveTo(sk.x - camX, sk.y - camY);
-        ctx.lineTo(sk.x - camX - Math.cos(sk.a) * 10, sk.y - camY - Math.sin(sk.a) * 10);
-        ctx.stroke();
-      }
-
-      const vis = (x: number, y: number) => x - camX > -80 && x - camX < W + 80 && y - camY > -80 && y - camY < H + 80;
-
-      for (const p of s.props) {
-        if (!vis(p.x, p.y)) continue;
-        const x = p.x - camX;
-        const y = p.y - camY;
-        ctx.save();
-        ctx.translate(x, y);
-        if (p.smashed) ctx.globalAlpha = 0.45;
-        if (p.kind === "cone") {
-          ctx.fillStyle = "#ff7a3d";
-          ctx.beginPath();
-          ctx.moveTo(0, -9);
-          ctx.lineTo(8, 9);
-          ctx.lineTo(-8, 9);
-          ctx.fill();
-        } else if (p.kind === "bin") {
-          ctx.fillStyle = "#4a8f6a";
-          ctx.fillRect(-9, -9, 18, 18);
-        } else if (p.kind === "hydrant") {
-          ctx.fillStyle = "#d9484a";
-          ctx.fillRect(-6, -8, 12, 16);
-        } else {
-          ctx.fillStyle = p.smashed ? "#6b5a3a" : "#2f7d4f";
-          ctx.beginPath();
-          ctx.arc(0, 0, 14, 0, Math.PI * 2);
-          ctx.fill();
-        }
-        ctx.restore();
-      }
-
-      for (const oc of s.cars) {
-        if (!vis(oc.x, oc.y)) continue;
-        ctx.save();
-        ctx.translate(oc.x - camX, oc.y - camY);
-        ctx.rotate(oc.angle + (oc.wrecked ? 0.6 : 0));
-        // shadow
-        ctx.fillStyle = "rgba(0,0,0,0.3)";
-        ctx.fillRect(-30, -16, 62, 34);
-        // body
-        ctx.fillStyle = oc.wrecked ? "#5a5a5a" : `hsl(${oc.hue}, 60%, 52%)`;
-        ctx.beginPath();
-        ctx.roundRect(-32, -18, 62, 36, 8);
-        ctx.fill();
-        // cabin + windshield
-        ctx.fillStyle = oc.wrecked ? "#3a3a3a" : `hsl(${oc.hue}, 45%, 38%)`;
-        ctx.beginPath();
-        ctx.roundRect(-8, -14, 24, 28, 5);
-        ctx.fill();
-        ctx.fillStyle = oc.wrecked ? "#222" : "rgba(180,225,255,0.85)";
-        ctx.fillRect(14, -11, 8, 22);
-        ctx.fillRect(-14, -11, 5, 22);
-        // wheels
-        ctx.fillStyle = "#15171c";
-        ctx.fillRect(-26, -22, 12, 7);
-        ctx.fillRect(-26, 15, 12, 7);
-        ctx.fillRect(14, -22, 12, 7);
-        ctx.fillRect(14, 15, 12, 7);
-        if (oc.wrecked) {
-          ctx.strokeStyle = "rgba(255,140,60,0.9)";
-          ctx.lineWidth = 3;
-          ctx.beginPath();
-          ctx.moveTo(-20, -8);
-          ctx.lineTo(-6, 6);
-          ctx.moveTo(-6, -8);
-          ctx.lineTo(10, 8);
-          ctx.stroke();
-        }
-        ctx.restore();
-      }
-
-      for (const p of s.peds) {
-        if (!vis(p.x, p.y)) continue;
-        ctx.save();
-        ctx.translate(p.x - camX, p.y - camY);
-        ctx.rotate(p.alive ? p.dir + Math.PI / 2 : p.rot);
-        if (!p.alive) ctx.globalAlpha = 0.85;
-        // shadow
-        ctx.fillStyle = "rgba(0,0,0,0.25)";
-        ctx.beginPath();
-        ctx.ellipse(1, 2, 11, 8, 0, 0, Math.PI * 2);
-        ctx.fill();
-        // body
-        ctx.fillStyle = p.alive ? "#3b6ea5" : "#7a3b3b";
-        ctx.beginPath();
-        ctx.roundRect(-7, -4, 14, 18, 6);
-        ctx.fill();
-        // legs
-        ctx.fillStyle = "#2c3644";
-        ctx.fillRect(-6, 12, 5, 7);
-        ctx.fillRect(1, 12, 5, 7);
-        // arms
-        ctx.fillStyle = p.alive ? "#ffe1c4" : "#ffb3b3";
-        ctx.fillRect(-11, -2, 4, 11);
-        ctx.fillRect(7, -2, 4, 11);
-        // head
-        ctx.beginPath();
-        ctx.arc(0, -11, 7, 0, Math.PI * 2);
-        ctx.fill();
-        // hair
-        ctx.fillStyle = "#4a3525";
-        ctx.beginPath();
-        ctx.arc(0, -13, 6.5, Math.PI, 0);
-        ctx.fill();
-        ctx.restore();
-      }
-
-      for (const d of s.debris) {
-        ctx.globalAlpha = Math.max(0, d.life);
-        ctx.fillStyle = d.color;
-        ctx.fillRect(d.x - camX - 2, d.y - camY - 2, 5, 5);
-        ctx.globalAlpha = 1;
-      }
-
-      // player car + Vera face
-      ctx.save();
-      ctx.translate(c.x - camX, c.y - camY);
-      ctx.rotate(c.angle);
-      // shadow
-      ctx.fillStyle = "rgba(0,0,0,0.3)";
-      ctx.beginPath();
-      ctx.roundRect(-38, -20, 76, 42, 10);
-      ctx.fill();
-      // body
-      ctx.fillStyle = "#ffd23f";
-      ctx.beginPath();
-      ctx.roundRect(-40, -22, 76, 44, 10);
-      ctx.fill();
-      // hood stripe + headlights
-      ctx.fillStyle = "rgba(0,0,0,0.12)";
-      ctx.fillRect(24, -22, 12, 44);
-      ctx.fillStyle = "#fff6c9";
-      ctx.fillRect(34, -18, 5, 8);
-      ctx.fillRect(34, 10, 5, 8);
-      // cabin
-      ctx.fillStyle = "#c9a227";
-      ctx.beginPath();
-      ctx.roundRect(-16, -18, 36, 36, 8);
-      ctx.fill();
-      // windshield
-      ctx.fillStyle = "rgba(190,230,255,0.9)";
-      ctx.fillRect(16, -14, 6, 28);
-      ctx.fillRect(-22, -14, 5, 28);
-      // wheels
-      ctx.fillStyle = "#1c1f24";
-      ctx.fillRect(-32, -27, 14, 8);
-      ctx.fillRect(-32, 19, 14, 8);
-      ctx.fillRect(18, -27, 14, 8);
-      ctx.fillRect(18, 19, 14, 8);
-      // Vera's face in the cabin — big and panicking
-      if (face.complete) {
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(-2, 0, 16, 0, Math.PI * 2);
-        ctx.clip();
-        ctx.drawImage(face, -19, -17, 34, 34);
-        ctx.restore();
-        ctx.strokeStyle = "#0f1115";
-        ctx.lineWidth = 2.5;
-        ctx.beginPath();
-        ctx.arc(-2, 0, 16, 0, Math.PI * 2);
-        ctx.stroke();
-        // steering wheel in front of her
-        ctx.strokeStyle = "#15171c";
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.arc(10, 0, 5, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-      // L-plate on the back
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(-40, -7, 8, 14);
-      ctx.fillStyle = "#d9484a";
-      ctx.font = "bold 10px sans-serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText("L", -36, 0);
-      ctx.restore();
-
-      if (playing) {
-        setHud((h) => {
-          const time = Math.ceil(s.time);
-          const faults = s.faults;
-          const chaos = Math.round(s.chaos);
-          if (h.time === time && h.faults === faults && h.chaos === chaos && h.speech === s.speech) return h;
-          return { time, faults, chaos, speech: s.speech };
+        setHud((current) => {
+          const next = {
+            time: Math.ceil(state.time),
+            faults: state.faults,
+            chaos: Math.round(state.chaos),
+            speed: Math.round(state.speed),
+            speech: state.speech,
+          };
+          return current.time === next.time && current.faults === next.faults && current.chaos === next.chaos && current.speed === next.speed && current.speech === next.speech ? current : next;
         });
       }
+
+      const activeState = stateRef.current;
+      const shakeX = activeState?.shake ? randomBetween(-9, 9) * activeState.shake : 0;
+      const shakeY = activeState?.shake ? randomBetween(-6, 6) * activeState.shake : 0;
+      context.save();
+      context.translate(shakeX, shakeY);
+      const horizon = height * 0.25;
+      const roadBottom = height * 0.79;
+      const stateForDraw = activeState ?? {
+        speed: 0, lateral: 0, steer: 0, distance: 0, time: GAME_TIME, faults: 0, chaos: 0, speech: "", speechT: 0,
+        shake: 0, flash: 0, crack: 0, checkpoint: 1, nextSpawn: 0, nextId: 0, obstacles: [], flying: [], last: now,
+      };
+
+      const sky = context.createLinearGradient(0, 0, 0, horizon);
+      sky.addColorStop(0, "#67b9dc");
+      sky.addColorStop(1, "#d5eef1");
+      context.fillStyle = sky;
+      context.fillRect(-20, -20, width + 40, horizon + 30);
+      context.fillStyle = "#7caf61";
+      context.fillRect(-20, horizon, width + 40, roadBottom - horizon + 20);
+      drawRoadside(context, width, horizon, roadBottom, stateForDraw);
+
+      const slices = 68;
+      for (let index = 0; index < slices; index++) {
+        const nearDepth = index / slices;
+        const farDepth = (index + 1) / slices;
+        const y1 = horizon + nearDepth * nearDepth * (roadBottom - horizon);
+        const y2 = horizon + farDepth * farDepth * (roadBottom - horizon);
+        const z1 = DRAW_DISTANCE * (1 - nearDepth);
+        const z2 = DRAW_DISTANCE * (1 - farDepth);
+        const center1 = width / 2 + roadCenterAt(stateForDraw.distance, z1) * (1 - nearDepth) - stateForDraw.lateral * nearDepth * nearDepth * width * 0.2;
+        const center2 = width / 2 + roadCenterAt(stateForDraw.distance, z2) * (1 - farDepth) - stateForDraw.lateral * farDepth * farDepth * width * 0.2;
+        const half1 = 25 + nearDepth * nearDepth * width * 0.44;
+        const half2 = 25 + farDepth * farDepth * width * 0.44;
+        context.fillStyle = index % 2 === 0 ? "#3a3b3f" : "#36373a";
+        context.beginPath();
+        context.moveTo(center1 - half1, y1);
+        context.lineTo(center1 + half1, y1);
+        context.lineTo(center2 + half2, y2);
+        context.lineTo(center2 - half2, y2);
+        context.closePath();
+        context.fill();
+        context.fillStyle = Math.floor((stateForDraw.distance + z1) / 55) % 2 === 0 ? "#f3eee0" : "#c84b43";
+        const curb = Math.max(2, farDepth * 10);
+        context.fillRect(center2 - half2 - curb, y2, curb, Math.max(2, y2 - y1 + 1));
+        context.fillRect(center2 + half2, y2, curb, Math.max(2, y2 - y1 + 1));
+      }
+
+      context.strokeStyle = "rgba(255,245,185,.85)";
+      context.lineWidth = 4;
+      context.setLineDash([24, 24]);
+      for (const lane of [-0.33, 0.33]) {
+        context.beginPath();
+        for (let step = 0; step <= 28; step++) {
+          const depth = step / 28;
+          const z = DRAW_DISTANCE * (1 - depth);
+          const y = horizon + depth * depth * (roadBottom - horizon);
+          const center = width / 2 + roadCenterAt(stateForDraw.distance, z) * (1 - depth) - stateForDraw.lateral * depth * depth * width * 0.2;
+          const half = 25 + depth * depth * width * 0.44;
+          const x = center + lane * half;
+          if (step === 0) context.moveTo(x, y);
+          else context.lineTo(x, y);
+        }
+        context.stroke();
+      }
+      context.setLineDash([]);
+
+      const visible = [...stateForDraw.obstacles].sort((a, b) => b.z - a.z);
+      for (const obstacle of visible) drawObstacle(context, obstacle, stateForDraw, width, horizon, roadBottom);
+
+      // Windshield frame, dashboard and Vera's extremely worried mirror portrait.
+      context.fillStyle = "#20252a";
+      context.beginPath();
+      context.moveTo(-20, 0);
+      context.lineTo(width * 0.085, 0);
+      context.lineTo(width * 0.16, roadBottom);
+      context.lineTo(-20, roadBottom + 40);
+      context.fill();
+      context.beginPath();
+      context.moveTo(width + 20, 0);
+      context.lineTo(width * 0.915, 0);
+      context.lineTo(width * 0.84, roadBottom);
+      context.lineTo(width + 20, roadBottom + 40);
+      context.fill();
+      const dash = context.createLinearGradient(0, roadBottom - 20, 0, height);
+      dash.addColorStop(0, "#363d42");
+      dash.addColorStop(1, "#15191d");
+      context.fillStyle = dash;
+      context.beginPath();
+      context.moveTo(-20, roadBottom - 12);
+      context.quadraticCurveTo(width / 2, roadBottom - 80, width + 20, roadBottom - 12);
+      context.lineTo(width + 20, height + 20);
+      context.lineTo(-20, height + 20);
+      context.closePath();
+      context.fill();
+
+      const mirrorW = Math.min(210, width * 0.29);
+      const mirrorH = mirrorW * 0.43;
+      const mirrorX = width / 2 - mirrorW / 2;
+      const mirrorY = 18;
+      context.fillStyle = "#181b1e";
+      context.beginPath();
+      context.roundRect(mirrorX - 7, mirrorY - 7, mirrorW + 14, mirrorH + 14, 14);
+      context.fill();
+      context.save();
+      context.beginPath();
+      context.roundRect(mirrorX, mirrorY, mirrorW, mirrorH, 9);
+      context.clip();
+      context.fillStyle = "#78d9d4";
+      context.fillRect(mirrorX, mirrorY, mirrorW, mirrorH);
+      if (face.complete && face.naturalWidth > 0) {
+        const bob = Math.sin(now / 90) * (activeState?.speed ?? 0) / 90;
+        context.drawImage(face, mirrorX + mirrorW * 0.19, mirrorY - mirrorH * 0.35 + bob, mirrorW * 0.62, mirrorH * 1.55);
+      }
+      if ((activeState?.shake ?? 0) > 0.2) {
+        context.fillStyle = "rgba(255,255,255,.9)";
+        context.font = `900 ${Math.max(16, mirrorW * 0.11)}px sans-serif`;
+        context.textAlign = "right";
+        context.fillText("AAAA!", mirrorX + mirrorW - 8, mirrorY + 24);
+      }
+      context.restore();
+
+      const wheelX = width * 0.34;
+      const wheelY = height * 0.91;
+      const wheelR = Math.min(92, width * 0.105);
+      context.save();
+      context.translate(wheelX, wheelY);
+      context.rotate(stateForDraw.steer * 0.85);
+      context.strokeStyle = "#0d1012";
+      context.lineWidth = Math.max(12, wheelR * 0.18);
+      context.beginPath();
+      context.arc(0, 0, wheelR, 0, Math.PI * 2);
+      context.stroke();
+      context.lineWidth = 9;
+      for (const angle of [0, 2.1, 4.2]) {
+        context.beginPath();
+        context.moveTo(0, 0);
+        context.lineTo(Math.cos(angle) * wheelR * 0.82, Math.sin(angle) * wheelR * 0.82);
+        context.stroke();
+      }
+      context.fillStyle = "#c6a62f";
+      context.beginPath();
+      context.arc(0, 0, 20, 0, Math.PI * 2);
+      context.fill();
+      context.restore();
+
+      for (const hit of stateForDraw.flying) {
+        const scale = 1.1 + (1.35 - hit.life) * 0.9;
+        if (hit.kind === "ped") drawPerson(context, hit.x, hit.y, scale, hit.color, hit.rot);
+        else {
+          context.save();
+          context.translate(hit.x, hit.y);
+          context.rotate(hit.rot);
+          context.scale(scale, scale);
+          context.fillStyle = hit.kind === "car" ? hit.color : hit.kind === "bin" ? "#34745b" : "#f27632";
+          context.beginPath();
+          context.roundRect(-22, -14, 44, 28, 5);
+          context.fill();
+          context.restore();
+        }
+      }
+
+      if (stateForDraw.crack > 0.05) {
+        context.strokeStyle = `rgba(220,240,245,${Math.min(0.75, stateForDraw.crack)})`;
+        context.lineWidth = 2;
+        const cx = width * 0.72;
+        const cy = height * 0.35;
+        for (let ray = 0; ray < 8; ray++) {
+          const angle = ray * Math.PI / 4 + 0.2;
+          context.beginPath();
+          context.moveTo(cx, cy);
+          context.lineTo(cx + Math.cos(angle) * 95 * stateForDraw.crack, cy + Math.sin(angle) * 95 * stateForDraw.crack);
+          context.stroke();
+        }
+      }
+      if (stateForDraw.flash > 0) {
+        context.fillStyle = `rgba(255,238,120,${stateForDraw.flash * 0.32})`;
+        context.fillRect(0, 0, width, height);
+      }
+      context.restore();
     };
-    raf = requestAnimationFrame(loop);
+    frame = requestAnimationFrame(loop);
     return () => {
-      cancelAnimationFrame(raf);
+      cancelAnimationFrame(frame);
       window.removeEventListener("resize", resize);
     };
   }, []);
 
-  const bind = (key: keyof typeof touchRef.current) => ({
-    onPointerDown: (e: React.PointerEvent) => {
-      e.preventDefault();
-      (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
-      touchRef.current[key] = true;
+  const bindControl = (control: keyof typeof touchRef.current) => ({
+    onPointerDown: (event: React.PointerEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      touchRef.current[control] = true;
     },
-    onPointerUp: (e: React.PointerEvent) => {
-      e.preventDefault();
-      touchRef.current[key] = false;
+    onPointerUp: (event: React.PointerEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      touchRef.current[control] = false;
     },
-    onPointerCancel: () => (touchRef.current[key] = false),
-    onPointerLeave: () => (touchRef.current[key] = false),
-    onContextMenu: (e: React.MouseEvent) => e.preventDefault(),
+    onPointerCancel: () => { touchRef.current[control] = false; },
+    onPointerLeave: () => { touchRef.current[control] = false; },
   });
 
-  const score = hud.chaos;
-  const verdict =
-    hud.faults > 60 ? "CATASTROPHIC" : hud.faults > 30 ? "SPECTACULARLY BAD" : hud.faults > 10 ? "VERY BAD" : "STILL BAD";
+  const curve = roadCurveAt((stateRef.current?.distance ?? 0) + 540);
+  const verdict = hud.faults > 45 ? "PUBLIC TRANSPORT RECOMMENDED" : hud.faults > 20 ? "ABSOLUTELY CATASTROPHIC" : "STILL SOMEHOW TERRIBLE";
 
   return (
-    <div className="relative h-[100dvh] w-full overflow-hidden bg-background select-none touch-none">
-      <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
+    <main className="relative h-[100dvh] w-full touch-none select-none overflow-hidden bg-background">
+      <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" aria-label="First-person driving game road view" />
 
-      {/* HUD */}
       {phase === "playing" && (
         <>
-          <div className="pointer-events-none absolute inset-x-0 top-0 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 p-3 sm:p-5">
-            <div className="flex min-w-0 items-center gap-3">
-              <div className="shrink-0 overflow-hidden rounded-full border-2 border-primary bg-card">
-                <img src={veraAsset.url} alt="Vera, the student driver" className="h-12 w-12 object-cover sm:h-14 sm:w-14" />
-              </div>
-              <div className="min-w-0 rounded-2xl bg-card/85 px-3 py-2 shadow-lg backdrop-blur">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Instructor</p>
-                <p className="truncate text-sm font-semibold text-foreground sm:text-base">{hud.speech}</p>
-              </div>
+          <section className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-2 p-3 sm:p-5" aria-label="Driving exam status">
+            <div className="max-w-[58%] border-l-4 border-primary bg-card/90 px-3 py-2 shadow-xl backdrop-blur-sm sm:max-w-md sm:px-4">
+              <p className="text-[10px] font-black uppercase text-primary">Terrified instructor</p>
+              <p className="line-clamp-2 text-xs font-bold text-card-foreground sm:text-base">{hud.speech}</p>
             </div>
-            <div className="shrink-0 rounded-2xl bg-card/85 px-3 py-2 text-right shadow-lg backdrop-blur">
-              <p className="font-mono text-2xl font-black text-foreground sm:text-3xl">0:{String(hud.time).padStart(2, "0")}</p>
-              <p className="text-xs font-semibold text-destructive">Faults {hud.faults}</p>
-              <p className="text-xs font-semibold text-primary">Chaos {hud.chaos}</p>
+            <div className="grid min-w-24 grid-cols-2 gap-x-3 border-t-4 border-destructive bg-card/90 px-3 py-2 text-right shadow-xl backdrop-blur-sm sm:min-w-36">
+              <p className="col-span-2 font-mono text-2xl font-black text-card-foreground sm:text-3xl">0:{String(hud.time).padStart(2, "0")}</p>
+              <div><p className="text-[9px] font-bold uppercase text-muted-foreground">Chaos</p><p className="font-black text-primary">{hud.chaos}</p></div>
+              <div><p className="text-[9px] font-bold uppercase text-muted-foreground">Faults</p><p className="font-black text-destructive">{hud.faults}</p></div>
             </div>
+          </section>
+
+          <div className="pointer-events-none absolute left-1/2 top-[16%] flex -translate-x-1/2 flex-col items-center sm:top-[14%]">
+            <div className="grid h-11 w-11 place-items-center border-2 border-primary bg-card/85 shadow-lg backdrop-blur-sm">
+              {curve < -0.18 ? <ArrowLeft className="h-7 w-7 text-primary" /> : curve > 0.18 ? <ArrowRight className="h-7 w-7 text-primary" /> : <ArrowUp className="h-7 w-7 text-primary" />}
+            </div>
+            <span className="mt-1 bg-card/80 px-2 py-0.5 text-[9px] font-black uppercase text-card-foreground">Checkpoint {stateRef.current?.checkpoint ?? 1}</span>
           </div>
 
-          {/* Touch controls */}
-          <div className="absolute inset-x-0 bottom-0 flex items-end justify-between p-4 pb-6 sm:p-6">
-            <div className="flex gap-3">
-              <button {...bind("left")} aria-label="Steer left" className="h-20 w-20 rounded-full bg-card/80 text-3xl font-black text-foreground shadow-xl backdrop-blur active:bg-primary active:text-primary-foreground">
-                ◀
+          <div className="pointer-events-none absolute bottom-[18%] left-1/2 flex -translate-x-1/2 items-center gap-2 bg-card/85 px-3 py-1.5 text-card-foreground shadow-lg backdrop-blur-sm sm:bottom-6">
+            <Gauge className="h-4 w-4 text-primary" />
+            <span className="font-mono text-sm font-black">{hud.speed} km/h</span>
+          </div>
+
+          <div className="absolute inset-x-0 bottom-0 flex items-end justify-between p-3 pb-4 sm:p-6">
+            <div className="flex gap-2 sm:gap-3">
+              <button {...bindControl("left")} aria-label="Steer left" className="grid h-16 w-16 place-items-center border-2 border-border bg-card/85 text-card-foreground shadow-xl backdrop-blur active:border-primary active:bg-primary active:text-primary-foreground sm:h-20 sm:w-20">
+                <ArrowLeft className="h-8 w-8" />
               </button>
-              <button {...bind("right")} aria-label="Steer right" className="h-20 w-20 rounded-full bg-card/80 text-3xl font-black text-foreground shadow-xl backdrop-blur active:bg-primary active:text-primary-foreground">
-                ▶
+              <button {...bindControl("right")} aria-label="Steer right" className="grid h-16 w-16 place-items-center border-2 border-border bg-card/85 text-card-foreground shadow-xl backdrop-blur active:border-primary active:bg-primary active:text-primary-foreground sm:h-20 sm:w-20">
+                <ArrowRight className="h-8 w-8" />
               </button>
             </div>
-            <div className="flex flex-col gap-3">
-              <button {...bind("brake")} aria-label="Brake" className="h-16 w-20 rounded-2xl bg-card/80 text-sm font-black uppercase text-foreground shadow-xl backdrop-blur active:bg-destructive active:text-destructive-foreground">
-                Brake
-              </button>
-              <button {...bind("gas")} aria-label="Accelerate" className="h-20 w-20 rounded-2xl bg-primary text-sm font-black uppercase text-primary-foreground shadow-xl active:scale-95">
-                Gas
-              </button>
+            <div className="flex items-end gap-2 sm:gap-3">
+              <button {...bindControl("brake")} aria-label="Brake" className="grid h-14 w-16 place-items-center border-b-4 border-destructive bg-card/90 text-xs font-black uppercase text-card-foreground shadow-xl active:bg-destructive active:text-destructive-foreground sm:h-16 sm:w-20">Brake</button>
+              <button {...bindControl("gas")} aria-label="Accelerate" className="grid h-20 w-16 place-items-center border-b-4 border-primary-foreground/30 bg-primary text-xs font-black uppercase text-primary-foreground shadow-xl active:translate-y-1 sm:h-24 sm:w-20">Gas</button>
             </div>
           </div>
-          <p className="pointer-events-none absolute bottom-2 left-1/2 hidden -translate-x-1/2 text-xs text-muted-foreground sm:block">
-            Keyboard: arrows / WASD
-          </p>
         </>
       )}
 
       {phase !== "playing" && (
-        <div className="absolute inset-0 grid place-items-center bg-background/80 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-3xl border border-border bg-card p-6 text-center shadow-2xl sm:p-8">
-            <div className="mx-auto h-24 w-24 overflow-hidden rounded-full border-4 border-primary sm:h-28 sm:w-28">
-              <img src={veraAsset.url} alt="Vera the student driver" className="h-full w-full object-cover" />
+        <section className="absolute inset-0 grid place-items-center bg-background/75 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md border-t-8 border-primary bg-card p-5 text-center shadow-2xl sm:p-8">
+            <div className="mx-auto h-24 w-24 overflow-hidden rounded-full border-4 border-primary bg-accent sm:h-28 sm:w-28">
+              <img src={veraAsset.url} alt="Vera, the student driver" className="h-full w-full object-cover" />
             </div>
             {phase === "intro" ? (
               <>
-                <h1 className="mt-5 text-3xl font-black uppercase leading-none tracking-tight text-foreground sm:text-4xl">
-                  Vera's Driving Exam
-                </h1>
-                <p className="mt-3 text-sm text-muted-foreground">
-                  60 seconds. One city. Zero talent. Try to pass — you can't. Every pedestrian, bin and parked car you
-                  destroy adds Chaos points.
-                </p>
-                <button
-                  onClick={startGame}
-                  className="mt-6 w-full rounded-2xl bg-primary px-6 py-4 text-lg font-black uppercase tracking-wide text-primary-foreground transition-transform active:scale-95"
-                >
-                  Start the exam
+                <p className="mt-4 text-xs font-black uppercase text-destructive">One examiner. Zero survival instinct.</p>
+                <h1 className="mt-1 text-3xl font-black uppercase leading-none text-card-foreground sm:text-4xl">Vera's Driving Exam</h1>
+                <p className="mx-auto mt-3 max-w-sm text-sm text-muted-foreground">Stay on the road, follow the checkpoint arrow and definitely do not collect pedestrians with the windscreen.</p>
+                <button onClick={startGame} className="mt-6 flex w-full items-center justify-center gap-2 bg-primary px-6 py-4 text-lg font-black uppercase text-primary-foreground shadow-lg active:translate-y-1">
+                  <ArrowUp className="h-5 w-5" /> Start the disaster
                 </button>
-                <p className="mt-4 text-xs text-muted-foreground">Touch buttons on mobile · arrows / WASD on desktop</p>
+                <p className="mt-4 text-xs text-muted-foreground">Mobile controls · arrow keys / WASD</p>
               </>
             ) : (
               <>
-                <h2 className="mt-5 text-4xl font-black uppercase text-destructive">Failed</h2>
-                <p className="mt-1 text-sm font-bold uppercase tracking-widest text-muted-foreground">{verdict}</p>
-                <div className="mt-5 grid grid-cols-2 gap-3">
-                  <div className="rounded-2xl bg-secondary p-4">
-                    <p className="text-xs uppercase tracking-widest text-muted-foreground">Chaos</p>
-                    <p className="text-3xl font-black text-foreground">{score}</p>
-                  </div>
-                  <div className="rounded-2xl bg-secondary p-4">
-                    <p className="text-xs uppercase tracking-widest text-muted-foreground">Faults</p>
-                    <p className="text-3xl font-black text-destructive">{hud.faults}</p>
-                  </div>
+                <p className="mt-4 text-xs font-black uppercase text-muted-foreground">Official examiner decision</p>
+                <h2 className="mt-1 text-5xl font-black uppercase text-destructive">Failed</h2>
+                <p className="mt-1 text-sm font-black uppercase text-card-foreground">{verdict}</p>
+                <div className="mt-5 grid grid-cols-2 gap-2">
+                  <div className="bg-secondary p-4"><p className="text-[10px] font-bold uppercase text-muted-foreground">Chaos</p><p className="text-3xl font-black text-primary">{hud.chaos}</p></div>
+                  <div className="bg-secondary p-4"><p className="text-[10px] font-bold uppercase text-muted-foreground">Faults</p><p className="text-3xl font-black text-destructive">{hud.faults}</p></div>
                 </div>
-                <p className="mt-4 text-sm italic text-muted-foreground">
-                  "Vera, I'm not angry. I'm relocating." — your instructor
-                </p>
-                <p className="mt-2 text-xs font-semibold text-muted-foreground">Best chaos: {best}</p>
-                <button
-                  onClick={startGame}
-                  className="mt-5 w-full rounded-2xl bg-primary px-6 py-4 text-lg font-black uppercase tracking-wide text-primary-foreground transition-transform active:scale-95"
-                >
-                  Retake the exam
+                <p className="mt-4 text-sm italic text-muted-foreground">“Vera, I'm not angry. I'm changing careers.” — the examiner</p>
+                <p className="mt-2 text-xs font-bold text-muted-foreground">Best chaos: {best}</p>
+                <button onClick={startGame} className="mt-5 flex w-full items-center justify-center gap-2 bg-primary px-6 py-4 text-lg font-black uppercase text-primary-foreground shadow-lg active:translate-y-1">
+                  <RotateCcw className="h-5 w-5" /> Endanger them again
                 </button>
               </>
             )}
           </div>
-        </div>
+        </section>
       )}
-    </div>
+    </main>
   );
 }
